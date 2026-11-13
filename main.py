@@ -1,71 +1,107 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import List
-from fastapi.middleware.cors import CORSMiddleware  # 解决跨域的核心
-
-app = FastAPI(title="AI Task Hub")
-
-# ==========================================
-# 核心配置：允许前端跨域访问（解决满屏红字）
-# ==========================================
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],      # 允许所有网址（包括你本地的 file:// 和 localhost）
-    allow_credentials=True,
-    allow_methods=["*"],      # 允许所有请求方法（GET, POST 等）
-    allow_headers=["*"],      # 允许所有请求头
-)
+from fastapi import FastAPI, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict  # 引入新的 ConfigDict
+from sqlalchemy import create_engine, Column, Integer, String, Boolean
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from fastapi.middleware.cors import CORSMiddleware
 
 # ==========================================
-# 数据模型定义
+# 1. 数据库配置 (新建一个 SQLite 文件)
+# ==========================================
+SQLALCHEMY_DATABASE_URL = "sqlite:///./tasks.db"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+
+# ==========================================
+# 2. 定义数据库模型 (建表)
+# ==========================================
+class TaskDB(Base):
+    __tablename__ = "tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)
+    priority = Column(String, default="普通")
+    is_done = Column(Boolean, default=False)
+
+
+# 生成数据库表
+Base.metadata.create_all(bind=engine)
+
+
+# ==========================================
+# 3. Pydantic 数据模型 (前后端交互格式)
 # ==========================================
 class TaskCreate(BaseModel):
     title: str
     priority: str = "普通"
 
+
 class TaskResponse(TaskCreate):
     id: int
     is_done: bool
+    # 修复警告：使用 Pydantic V2 的新写法
+    model_config = ConfigDict(from_attributes=True)
+
 
 # ==========================================
-# 模拟数据库（存在内存里）
+# 4. FastAPI 初始化 & 跨域设置
 # ==========================================
-tasks_db = [
-    {"id": 1, "title": "学习FastAPI", "priority": "高", "is_done": False},
-    {"id": 2, "title": "买咖啡豆", "priority": "普通", "is_done": True}
-]
+app = FastAPI(title="AI Task Hub")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+)
+
+
+# 依赖注入：每次请求时打开数据库，请求结束自动关闭
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 
 # ==========================================
-# 接口路由
+# 5. 接口路由 (CRUD)
 # ==========================================
-# 1. GET 接口：获取所有任务
-@app.get("/tasks", response_model=List[TaskResponse])
-def get_tasks():
-    return tasks_db
-
-# 2. POST 接口：添加新任务
-@app.post("/tasks")
-def create_task(task: TaskCreate):
-    new_id = len(tasks_db) + 1
-    new_task = {
-        "id": new_id,
-        "title": task.title,
-        "priority": task.priority,
-        "is_done": False
-    }
-    tasks_db.append(new_task)
-    return {"message": "添加成功！", "task": new_task}
+# 【查】GET: 获取所有任务
+@app.get("/tasks", response_model=list[TaskResponse])
+def get_tasks(db: Session = Depends(get_db)):
+    tasks = db.query(TaskDB).all()
+    return tasks
 
 
-# 3. PUT 接口：更新任务的完成状态
+# 【增】POST: 添加新任务
+@app.post("/tasks", response_model=TaskResponse)
+def create_task(task: TaskCreate, db: Session = Depends(get_db)):
+    new_task = TaskDB(title=task.title, priority=task.priority)
+    db.add(new_task)
+    db.commit()
+    db.refresh(new_task)
+    return new_task
+
+
+# 【改】PUT: 修改任务状态
 @app.put("/tasks/{task_id}")
-def update_task_status(task_id: int, is_done: bool):
-    # 遍历我们的临时数据库，找对应的任务 ID
-    for task in tasks_db:
-        if task["id"] == task_id:
-            # 找到后，把完成状态改掉
-            task["is_done"] = is_done
-            return {"message": "状态更新成功", "task": task}
+def update_task_status(task_id: int, is_done: bool, db: Session = Depends(get_db)):
+    task = db.query(TaskDB).filter(TaskDB.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
 
-    # 如果循环跑完都没找到，返回错误提示
-    return {"error": "没找到这个任务"}
+    task.is_done = is_done
+    db.commit()
+    return {"message": "状态更新成功", "task_id": task_id}
+
+
+# 【删】DELETE: 删除任务
+@app.delete("/tasks/{task_id}")
+def delete_task(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(TaskDB).filter(TaskDB.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="你要删除的任务不存在")
+
+    db.delete(task)
+    db.commit()
+    return {"message": f"成功删除了任务：{task.title}"}
