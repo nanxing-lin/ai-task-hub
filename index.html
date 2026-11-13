@@ -139,14 +139,16 @@
 
         <div class="input-group">
             <input type="text" id="task-title" placeholder="准备做点什么？">
-            <select id="task-priority">
-                <option value="普通">🟢 普通优先级</option>
-                <option value="高">🔴 高优先级</option>
-            </select>
             <button onclick="addTask()">添加任务</button>
         </div>
 
-        <ul id="task-list"></ul>
+                <ul id="task-list"></ul>
+
+        <!-- 新增：AI 提示框 -->
+        <div id="ai-message-box" style="display: none; margin-top: 20px; padding: 15px; background: #e3f2fd; border-left: 4px solid #1565c0; border-radius: 4px; color: #333; font-size: 14px;">
+            <strong>🤖 AI 管家：</strong> <span id="ai-message-text"></span>
+        </div>
+
     </div>
 
     <script>
@@ -167,7 +169,7 @@
 
                     li.innerHTML = `
                         <div style="display:flex; align-items:center;">
-                            <span class="tag ${task.priority}">${task.priority}</span>
+                            <span class="tag ${task.priority || '普通'}">${task.priority || '普通'}</span>
                             <span class="task-title">${task.title}</span>
                         </div>
 
@@ -200,17 +202,32 @@
         }
 
         // 2. 添加新任务
-        async function addTask() {
+                      async function addTask() {
             const title = document.getElementById("task-title").value;
-            const priority = document.getElementById("task-priority").value;
-
             if (!title) return alert("请输入任务内容！");
 
-            await fetch(API_URL, {
+            // 显示 AI 思考中...
+            const aiBox = document.getElementById("ai-message-box");
+            const aiText = document.getElementById("ai-message-text");
+            aiBox.style.display = "block";
+            aiText.innerText = "正在飞速思考中，请稍候... ⏳";
+            aiBox.style.background = "#fff3e0";
+            aiBox.style.borderLeftColor = "#ff9800";
+
+            const response = await fetch(API_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: title, priority: priority })
+                body: JSON.stringify({ title: title })
             });
+
+            const result = await response.json();
+
+            // 接收后端传来的 AI 分析结果
+            if (result.ai_message) {
+                aiBox.style.background = "#e3f2fd";
+                aiBox.style.borderLeftColor = "#1565c0";
+                aiText.innerText = result.ai_message;
+            }
 
             document.getElementById("task-title").value = "";
             fetchTasks();
