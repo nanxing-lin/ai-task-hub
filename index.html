@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的每日任务</title>
+    <!-- 引入好看的字体 -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        /* ================= 1. 页面基础样式 ================= */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #333;
+        }
+
+        /* ================= 2. 主卡片样式 ================= */
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            width: 100%;
+            max-width: 500px;
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        h2 { text-align: center; margin-bottom: 20px; color: #2c3e50; font-weight: 700; }
+
+        /* ================= 3. 输入框和按钮 ================= */
+        .input-group { display: flex; flex-direction: column; gap: 12px; margin-bottom: 25px; }
+
+        input, select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 15px;
+            outline: none;
+            transition: all 0.3s ease;
+            background: #f9f9f9;
+            font-family: inherit;
+        }
+        input:focus, select:focus { border-color: #4CAF50; background: #fff; box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1); }
+
+        button {
+            padding: 12px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.3s ease, transform 0.1s ease;
+            font-family: inherit;
+        }
+        button:hover { background: #43a047; }
+        button:active { transform: scale(0.98); }
+
+        /* ================= 4. 任务列表样式 ================= */
+        ul { list-style-type: none; }
+        li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #fff;
+            border: 1px solid #eee;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 10px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            animation: slideIn 0.3s ease;
+        }
+        li:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+
+        /* 优先级标签 */
+        .tag { font-size: 12px; padding: 3px 8px; border-radius: 4px; margin-right: 10px; font-weight: 500; }
+        .tag.高 { background: #ffebee; color: #c62828; }
+        .tag.普通 { background: #e3f2fd; color: #1565c0; }
+
+        /* 已完成任务的划线样式 */
+        .done .task-title { text-decoration: line-through; color: #a0a0a0; }
+
+        /* 入场动画 */
+        @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>📝 我的每日任务</h2>
+
+        <!-- 表单输入区 -->
+        <div class="input-group">
+            <input type="text" id="task-title" placeholder="准备做点什么？">
+            <select id="task-priority">
+                <option value="普通">🟢 普通优先级</option>
+                <option value="高">🔴 高优先级</option>
+            </select>
+            <button onclick="addTask()">添加任务</button>
+        </div>
+
+        <!-- 任务列表展示区 -->
+        <ul id="task-list"></ul>
+    </div>
+
+    <script>
+        // 你的后端 API 地址
+        const API_URL = "http://127.0.0.1:8000/tasks";
+
+        // ================= 功能 1：获取并渲染任务列表 =================
+        async function fetchTasks() {
+            try {
+                const response = await fetch(API_URL);
+                const tasks = await response.json();
+
+                const list = document.getElementById("task-list");
+                list.innerHTML = ""; // 每次渲染前清空旧列表
+
+                // 遍历后端传来的任务数组
+                tasks.forEach(task => {
+                    const li = document.createElement("li");
+
+                    // 如果任务是完成的，加上 done 类名（触发划线样式）
+                    if (task.is_done) li.className = "done";
+
+                    // 拼接 HTML 结构
+                    li.innerHTML = `
+                        <div style="display:flex; align-items:center;">
+                            <span class="tag ${task.priority}">${task.priority}</span>
+                            <span class="task-title">${task.title}</span>
+                        </div>
+                        <!-- 点击图标触发 toggleTask 函数，传入任务ID和当前状态 -->
+                        <span
+                            style="cursor: pointer; font-size: 24px; user-select: none;"
+                            onclick="toggleTask(${task.id}, ${task.is_done})"
+                            title="点击切换状态"
+                        >
+                            ${task.is_done ? "✅" : "⭕"}
+                        </span>
+                    `;
+                    list.appendChild(li);
+                });
+            } catch (error) {
+                console.error("获取任务失败，请检查后端是否启动:", error);
+            }
+        }
+
+        // ================= 功能 2：添加新任务 =================
+        async function addTask() {
+            const titleInput = document.getElementById("task-title");
+            const priorityInput = document.getElementById("task-priority");
+
+            const title = titleInput.value.trim(); // 去除首尾空格
+            const priority = priorityInput.value;
+
+            if (!title) return alert("请输入任务内容！");
+
+            // 发送 POST 请求
+            await fetch(API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: title, priority: priority })
+            });
+
+            titleInput.value = ""; // 清空输入框
+            fetchTasks(); // 重新加载列表
+        }
+
+        // ================= 功能 3：切换任务状态 =================
+        async function toggleTask(taskId, currentStatus) {
+            // 取反：如果当前是完成(true)，变成未完成(false)；反之亦然
+            const newStatus = !currentStatus;
+
+            // 发送 PUT 请求，路径里带上 ID，问号后面带上状态
+            await fetch(`${API_URL}/${taskId}?is_done=${newStatus}`, {
+                method: 'PUT'
+            });
+
+            fetchTasks(); // 状态修改成功后，重新加载列表
+        }
+
+        // ================= 初始化：页面一打开就拉取数据 =================
+        fetchTasks();
+    </script>
+</body>
+</html>
